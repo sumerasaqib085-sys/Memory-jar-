@@ -1,0 +1,342 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Daily Memory Jar — Single File App</title>
+  <style>
+    :root{
+      --bg:#f7fdf9;
+      --card:#ffffff;
+      --muted:#6b7280;
+      --accent1:#a7f3d0; /* pastel green */
+      --accent2:#fef3c7; /* pastel yellow */
+      --accent3:#bfdbfe; /* pastel blue */
+      --jar:#ecfdf5;
+      font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+      color:#0f172a;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#f0fbff);}
+    .app{
+      max-width:420px;margin:18px auto;padding:18px;min-height:calc(100vh - 36px);
+      display:flex;flex-direction:column;gap:14px;align-items:center;
+    }
+    header{width:100%;display:flex;align-items:center;justify-content:space-between}
+    h1{font-size:20px;margin:0}
+    .subtitle{font-size:12px;color:var(--muted)}.jar-wrap{width:100%;display:flex;justify-content:center}
+.jar{
+  width:320px;height:420px;border-radius:28px;background:linear-gradient(180deg,var(--jar),#fff);box-shadow:0 10px 30px rgba(2,6,23,0.08);position:relative;overflow:hidden;padding:18px;display:flex;flex-direction:column;align-items:center;
+}
+.jar-glass{position:absolute;inset:0;border-radius:28px;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,0.6),transparent);}
+.marbles{
+  width:100%;flex:1;display:flex;flex-wrap:wrap;align-content:flex-start;gap:10px;padding-top:10px;overflow:auto;justify-content:center;padding-bottom:14px;
+}
+.marble{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#042a1b;font-weight:600;box-shadow:0 0 12px rgba(2,255,200,0.45),0 6px 12px rgba(2,6,23,0.08),inset 0 -6px 10px rgba(255,255,255,0.25);cursor:pointer;transition:transform .18s ease;position:relative;overflow:hidden;animation:floatAnim 6s ease-in-out infinite alternate;}
+.marble:active{transform:scale(.96)}
+.controls{display:flex;gap:8px;margin-top:12px}
+button{background:var(--card);border:0;padding:10px 12px;border-radius:12px;box-shadow:0 6px 12px rgba(2,6,23,0.05);font-weight:600}
+.primary{background:linear-gradient(90deg,var(--accent1),var(--accent3));color:#052e1b}
+.modal-backdrop{position:fixed;inset:0;background:rgba(2,6,23,0.45);display:none;align-items:center;justify-content:center;padding:24px}
+.modal{width:100%;max-width:520px;background:var(--card);border-radius:12px;padding:14px}
+.row{display:flex;gap:8px;align-items:center}
+.field{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef6}
+.mem-list{display:grid;grid-template-columns:1fr;gap:8px;max-height:60vh;overflow:auto;padding:6px}
+.mem-item{display:flex;gap:8px;align-items:center;padding:8px;border-radius:8px;background:linear-gradient(90deg,#fff,#fbfeff);box-shadow:0 4px 8px rgba(2,6,23,0.03)}
+.mem-thumb{width:56px;height:56px;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.mem-meta{flex:1}
+.muted{color:var(--muted);font-size:12px}
+.tiny{font-size:11px;color:var(--muted)}
+.drop-anim{animation:drop .7s cubic-bezier(.2,.9,.3,1)}
+@keyframes drop{0%{transform:translateY(-120%) scale(.6);opacity:0}60%{transform:translateY(6%) scale(1.05);opacity:1}100%{transform:translateY(0) scale(1)} }
+
+/* responsive */
+@media (max-width:420px){.jar{width:92vw;height:72vh}}
+
+footer{font-size:12px;color:var(--muted);text-align:center;margin-top:8px}
+
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>Daily Memory Jar</h1>
+        <div class="subtitle">Save one tiny happy memory at a time</div>
+      </div>
+      <div class="tiny">Offline • Local</div>
+    </header><div class="jar-wrap">
+  <div class="jar" id="jar">
+    <div class="jar-glass"></div>
+    <div class="marbles" id="marbles" aria-live="polite"></div>
+    <div class="controls">
+      <button id="addBtn" class="primary">➕ Add Memory</button>
+      <button id="randBtn">🎲 Random</button>
+      <button id="allBtn">🗂️ All</button>
+    </div>
+  </div>
+</div>
+
+<footer>Tip: shake your phone to get a random memory (if supported)</footer>
+
+  </div>  <!-- Modal backdrop -->  <div class="modal-backdrop" id="backdrop">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div id="modalContent"></div>
+    </div>
+  </div>  <template id="memTemplate">
+    <div class="mem-item">
+      <div class="mem-thumb"></div>
+      <div class="mem-meta">
+        <div class="mem-text"></div>
+        <div class="tiny mem-time"></div>
+      </div>
+      <div class="muted mem-actions">
+        <button class="openBtn">Open</button>
+        <button class="delBtn">Delete</button>
+      </div>
+    </div>
+  </template>  <script>
+    // Simple single-file Memory Jar app
+    // Data model: localStorage key 'dmj_memories' -> JSON array of {id, type:'text'|'image'|'audio', text, data(base64), ts, color}
+
+    const KEY = 'dmj_memories_v1';
+    const marblesEl = document.getElementById('marbles');
+    const addBtn = document.getElementById('addBtn');
+    const randBtn = document.getElementById('randBtn');
+    const allBtn = document.getElementById('allBtn');
+    const backdrop = document.getElementById('backdrop');
+    const modalContent = document.getElementById('modalContent');
+
+    // util
+    const uid = () => Math.random().toString(36).slice(2,9);
+    const now = ts=> new Date(ts).toLocaleString();
+    const randColor = ()=> {
+      const arr = ['#a7f3d0','#fef3c7','#bfdbfe','#ffd6e0','#e6e6ff','#c7f9ff'];
+      return arr[Math.floor(Math.random()*arr.length)];
+    }
+
+    function load(){
+      const raw = localStorage.getItem(KEY);
+      try{ return raw? JSON.parse(raw): [] }catch(e){return []}
+    }
+    function save(arr){ localStorage.setItem(KEY, JSON.stringify(arr)); }
+
+    function render(){
+      const data = load();
+      marblesEl.innerHTML='';
+      if(!data.length){
+        marblesEl.innerHTML = '<div class="muted" style="padding:18px; text-align:center">Your jar is empty — add a memory to start.</div>';
+        return;
+      }
+      // show latest 24 small marbles
+      const shown = data.slice(-48);
+      shown.reverse();
+      shown.forEach(item=>{
+        const el = document.createElement('div');
+        el.className='marble drop-anim';
+        el.title = item.text ? item.text.slice(0,80) : (item.type||'');
+        el.style.background = item.color || randColor();
+        el.dataset.id = item.id;
+        if(item.type==='text') el.textContent = item.text?.slice(0,2)?.toUpperCase() || 'T';
+        else if(item.type==='image'){
+          const img = document.createElement('img'); img.src = item.data; img.style.width='100%'; img.style.height='100%'; img.style.objectFit='cover'; el.appendChild(img);
+        } else if(item.type==='audio'){
+          el.innerHTML = '<svg viewBox="0 0 24 24" width="28" height="28" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.08))"><path d="M3 9v6h4l5 4V5L7 9H3z" fill="rgba(0,0,0,0.08)"/></svg>'
+        } else el.textContent='?';
+
+        el.addEventListener('click', ()=> openMemory(item.id));
+        marblesEl.appendChild(el);
+      })
+    }
+
+    // Modal helpers
+    function openModal(html){ modalContent.innerHTML = ''; modalContent.appendChild(html); backdrop.style.display='flex'; }
+    function closeModal(){ backdrop.style.display='none'; modalContent.innerHTML=''; }
+    backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) closeModal(); });
+
+    // Add memory flow
+    addBtn.addEventListener('click', ()=>{
+      const container = document.createElement('div');
+      container.innerHTML = `
+        <h3>Add a Memory</h3>
+        <div style="display:flex;gap:8px;margin:8px 0">
+          <button id="addText">Text</button>
+          <button id="addImage">Photo</button>
+          <button id="addAudio">Voice</button>
+        </div>
+        <div id="addArea"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+          <button id="closeModal">Close</button>
+        </div>
+      `;
+      openModal(container);
+      container.querySelector('#closeModal').addEventListener('click', closeModal);
+
+      container.querySelector('#addText').addEventListener('click', ()=>{
+        const area = container.querySelector('#addArea');
+        area.innerHTML = `
+          <textarea id="memText" class="field" rows="4" placeholder="Write one small memory... (one sentence is perfect)"></textarea><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+        <button id="saveText" class="primary">Save</button>
+      </div>
+    `;
+    area.querySelector('#saveText').addEventListener('click', ()=>{
+      const text = area.querySelector('#memText').value.trim();
+      if(!text) return alert('Please write a small memory.');
+      const mem = {id:uid(),type:'text',text,ts:Date.now(),color:randColor()};
+      const arr = load(); arr.push(mem); save(arr); render(); closeModal();
+    });
+  });
+
+  container.querySelector('#addImage').addEventListener('click', ()=>{
+    const area = container.querySelector('#addArea');
+    area.innerHTML = `
+      <div class="row" style="margin-top:6px">
+        <input type="file" accept="image/*" id="imgFile" />
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+        <button id="saveImg" class="primary">Save Photo</button>
+      </div>
+    `;
+    area.querySelector('#saveImg').addEventListener('click', ()=>{
+      const f = area.querySelector('#imgFile').files[0];
+      if(!f) return alert('Pick a photo first');
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        const data = reader.result;
+        const mem = {id:uid(),type:'image',data,ts:Date.now(),color:randColor(),text: f.name};
+        const arr = load(); arr.push(mem); save(arr); render(); closeModal();
+      }
+      reader.readAsDataURL(f);
+    });
+  });
+
+  // Audio recorder
+  container.querySelector('#addAudio').addEventListener('click', ()=>{
+    const area = container.querySelector('#addArea');
+    area.innerHTML = `
+      <div class="row" style="margin-top:6px">
+        <div id="recStatus" class="muted">Press record to start a short voice memory</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;justify-content:center">
+        <button id="recBtn">Record</button>
+        <button id="stopBtn" disabled>Stop</button>
+      </div>
+      <div id="recList" style="margin-top:8px"></div>
+    `;
+
+    let rec, chunks=[];
+    const recBtn = area.querySelector('#recBtn');
+    const stopBtn = area.querySelector('#stopBtn');
+    const recStatus = area.querySelector('#recStatus');
+    const recList = area.querySelector('#recList');
+
+    recBtn.addEventListener('click', async ()=>{
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return alert('Recording not supported in this browser');
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      rec = new MediaRecorder(stream);
+      chunks=[];
+      rec.ondataavailable = e=>chunks.push(e.data);
+      rec.onstop = async ()=>{
+        const blob = new Blob(chunks,{type:'audio/webm'});
+        const reader = new FileReader();
+        reader.onload = ()=>{
+          const data = reader.result; // base64
+          const mem = {id:uid(),type:'audio',data,ts:Date.now(),color:randColor(),text:'Voice memory'};
+          const arr = load(); arr.push(mem); save(arr); render(); closeModal();
+        }
+        reader.readAsDataURL(blob);
+      }
+      rec.start(); recBtn.disabled=true; stopBtn.disabled=false; recStatus.textContent = 'Recording...';
+    });
+    stopBtn.addEventListener('click', ()=>{ if(rec && rec.state==='recording') rec.stop(); recBtn.disabled=false; stopBtn.disabled=true; recStatus.textContent='Processing...'; });
+  });
+});
+
+// Open a specific memory by id
+function openMemory(id){
+  const data = load(); const item = data.find(x=>x.id===id); if(!item) return;
+  const el = document.createElement('div');
+  el.innerHTML = `<h3>Memory</h3><div style="margin:8px 0" id="memArea"></div><div style="display:flex;justify-content:space-between;margin-top:12px"><div class="tiny">${now(item.ts)}</div><div><button id="closeBtn">Close</button> <button id="delBtn">Delete</button></div></div>`;
+  const memArea = el.querySelector('#memArea');
+  if(item.type==='text'){
+    const p = document.createElement('div'); p.textContent = item.text; p.style.whiteSpace='pre-wrap'; memArea.appendChild(p);
+  } else if(item.type==='image'){
+    const img = document.createElement('img'); img.src = item.data; img.style.maxWidth='100%'; img.style.borderRadius='8px'; memArea.appendChild(img);
+    if(item.text) { const d = document.createElement('div'); d.className='tiny'; d.textContent = item.text; memArea.appendChild(d); }
+  } else if(item.type==='audio'){
+    const au = document.createElement('audio'); au.controls=true; au.src = item.data; memArea.appendChild(au);
+  }
+
+  openModal(el);
+  el.querySelector('#closeBtn').addEventListener('click', closeModal);
+  el.querySelector('#delBtn').addEventListener('click', ()=>{
+    if(!confirm('Delete this memory?')) return;
+    const arr = load().filter(x=>x.id!==id); save(arr); render(); closeModal();
+  });
+}
+
+// Show all memories list
+allBtn.addEventListener('click', ()=>{
+  const data = load().slice().reverse();
+  const container = document.createElement('div');
+  container.innerHTML = `<h3>All Memories</h3><div class="mem-list" id="memList"></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button id="closeAll">Close</button><button id="exportBtn">Export JSON</button><button id="clearBtn">Clear All</button></div>`;
+  const memList = container.querySelector('#memList');
+  data.forEach(it=>{
+    const node = document.createElement('div'); node.className='mem-item';
+    const thumb = document.createElement('div'); thumb.className='mem-thumb'; thumb.style.background=it.color;
+    if(it.type==='image'){ const i=document.createElement('img'); i.src=it.data; i.style.width='100%'; i.style.height='100%'; i.style.objectFit='cover'; thumb.appendChild(i);} else thumb.textContent = it.type?.slice(0,1).toUpperCase();
+    const meta = document.createElement('div'); meta.className='mem-meta'; meta.innerHTML = `<div>${it.text? (it.text.length>48? it.text.slice(0,48)+'...':it.text) : it.type}</div><div class="tiny">${now(it.ts)}</div>`;
+    const actions = document.createElement('div'); actions.className='muted'; actions.innerHTML = `<button class="openBtn">Open</button> <button class="delBtn">Delete</button>`;
+    node.appendChild(thumb); node.appendChild(meta); node.appendChild(actions);
+    actions.querySelector('.openBtn').addEventListener('click', ()=>openMemory(it.id));
+    actions.querySelector('.delBtn').addEventListener('click', ()=>{ if(confirm('Delete?')){ const arr=load().filter(x=>x.id!==it.id); save(arr); render(); openModal(container); } });
+    memList.appendChild(node);
+  });
+  openModal(container);
+  container.querySelector('#closeAll').addEventListener('click', closeModal);
+  container.querySelector('#clearBtn').addEventListener('click', ()=>{
+    if(!confirm('Clear all memories? This cannot be undone.')) return; localStorage.removeItem(KEY); render(); closeModal();
+  });
+  container.querySelector('#exportBtn').addEventListener('click', ()=>{
+    const payload = JSON.stringify(load());
+    const blob = new Blob([payload],{type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='daily-memory-jar.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  });
+});
+
+// Random memory
+randBtn.addEventListener('click', ()=>{
+  const arr = load(); if(!arr.length) return alert('Your jar is empty. Add a memory first.');
+  const item = arr[Math.floor(Math.random()*arr.length)]; openMemory(item.id);
+});
+
+// Shake detection (very simple)
+(function(){
+  let last=0, x=0,y=0,z=0; const thresh=18; // tweak
+  function handler(e){
+    const a = e.accelerationIncludingGravity || e.acceleration || {}; const nowt = Date.now();
+    if(!a.x) return;
+    const dx = Math.abs(a.x - x), dy=Math.abs(a.y - y), dz=Math.abs(a.z - z);
+    if((dx+dy+dz) > thresh && (nowt - last) > 700){ last = nowt; randBtn.classList.add('primary'); setTimeout(()=>randBtn.classList.remove('primary'),380); randBtn.click(); }
+    x=a.x; y=a.y; z=a.z;
+  }
+  if(window.DeviceMotionEvent){ try{ window.addEventListener('devicemotion', handler, false);}catch(e){}}
+})();
+
+// Initialize
+render();
+
+// small UX: clicking an empty area also suggests to add
+marblesEl.addEventListener('click', (e)=>{ if(e.target===marblesEl) addBtn.click(); });
+
+// accessibility: keyboard support for add
+document.addEventListener('keydown', (e)=>{ if(e.key==='a') addBtn.click(); if(e.key==='r') randBtn.click(); if(e.key==='l') allBtn.click(); });
+
+// Clean up old storage if corrupt
+try{ if(!localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify([])); }catch(e){console.warn('localStorage not available',e)}
+
+  </script>
+</body>
+</html>
